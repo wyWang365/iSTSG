@@ -5,7 +5,7 @@ import warnings
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-'''Set functions'''
+'''Set functions''' 
 # Multiband (timing) data reading function
 def readmultiImg(image_file):
     ds = gdal.Open(image_file)
