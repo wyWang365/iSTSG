@@ -14,7 +14,7 @@ The open-source code is divided into **Google earth engine version (JS)** and **
 **The Google earth engine version is divided into two files: GEE_interpol and GEE_mian**
 
 Users can sign in to the Google earth engine platform and store the linear interpolation function GEE_interpol in a separate code file.
-Filter main when running GEE_mian, it is necessary to change the function call route (require('users/Your_account_path/name_of_the_folder_where_you_store_the_interpol_file:interpol');), and the user can change the ROI range and various parameters in the function.
+Filter main when running GEE_mian, it is necessary to change the function call route (require('users/Your_account_path/name_of_the_folder_where_you_store_the_interpol_file:interpol');), and the user can change the ROI range and various parameters in the code.
 
 
 
