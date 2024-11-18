@@ -1,1 +1,297 @@
+from osgeo import gdal
+import numpy as np
+from scipy.signal import savgol_coeffs
+import warnings
+
+warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+'''Set functions'''
+# Multiband (timing) data reading function
+def readmultiImg(image_file):
+    ds = gdal.Open(image_file)
+
+    if ds is None:
+        print("can't open file.")
+    else:
+        width = ds.RasterXSize
+        height = ds.RasterYSize
+        num_bands = ds.RasterCount
+
+        image_data = np.zeros((height, width, num_bands))
+
+        for band_num in range(1, num_bands + 1):
+            band = ds.GetRasterBand(band_num)
+            band_data = band.ReadAsArray()
+            image_data[:, :, band_num - 1] = band_data
+
+        ds = None
+
+        # image_data (height, width, num_bands)
+        return image_data
+
+def SummaryQA_process(img):
+    RIimg = img.copy()
+    RIimg[img == -1] = 2
+    RIimg[img == 3] = 2
+
+    return RIimg
+
+# Open the window on the space
+def windowneiSer(matrix, row, col, win):
+    row_start = max(row - win, 0)
+    row_end = min(row + win, matrix.shape[0] - 1)
+    col_start = max(col - win, 0)
+    col_end = min(col + win, matrix.shape[1] - 1)
+
+    window = matrix[row_start:row_end + 1, col_start:col_end + 1, :]
+
+    return window
+
+# Defining statistical function
+def count_not_bad(matrix):
+    return np.sum(matrix != 2, axis=2)
+
+# Calculated correlation coefficient
+def everyR(center, other):
+    correlations = np.zeros(other.shape[0])
+    for i in range(other.shape[0]):
+        mask = ~np.isnan(center) & ~np.isnan(other[i, :]) & (center != 0) & (other[i, :] != 0)
+
+        center_filtered = center[mask]
+        other_filtered = other[i, :][mask]
+
+        correlations[i] = np.corrcoef(center_filtered, other_filtered)[0, 1]
+
+    return correlations
+
+# Find the coefficient of linear regression
+def linerFit(array_nocenter, t):
+
+    m, n, s = array_nocenter.shape
+    k = np.zeros(s)
+    b = np.zeros(s)
+    targetid = min(t, Thalfwin)
+    targetime = array_nocenter[:, :, targetid]
+
+    for j in range(s):
+        Simtime = array_nocenter[:, :, j]
+
+        condition = ~np.isnan(Simtime) & ~np.isnan(targetime)
+
+        X_values = Simtime[condition]
+        Y_values = targetime[condition]
+
+        if len(X_values) == 0 or len(Y_values) == 0:
+            k[j] = None
+            b[j] = None
+        else:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=np.RankWarning)
+                kj, bj = np.polyfit(X_values, Y_values, 1)
+                k[j] = kj
+                b[j] = bj
+
+
+    k[targetid] = None
+    b[targetid] = None
+    return k, b
+
+# Linear interpolation function
+def linear_interpolation(data):
+    non_nan_indices = np.where(~np.isnan(data))[0]
+
+    if len(non_nan_indices) == 0:
+        return data
+
+    first_non_nan_index = non_nan_indices[0]
+    data[:first_non_nan_index] = data[first_non_nan_index]
+
+    last_non_nan_index = non_nan_indices[-1]
+    data[last_non_nan_index + 1:] = data[last_non_nan_index]
+
+    nan_indices = np.isnan(data)
+    data[nan_indices] = np.interp(np.where(nan_indices)[0], non_nan_indices, data[non_nan_indices])
+
+    return data
+
+def check_sign(regression, mod):
+    sign_regression = np.sign(regression)
+    sign_mod = np.sign(mod)
+
+    different_sign_indices = (sign_regression != sign_mod) & (~np.isnan(regression)) & (~np.isnan(mod))
+
+    regression = np.where(different_sign_indices, np.nan, regression)
+    return regression
+
+def auto_filter(curve_0, SGcoeff):
+    winsize = int(len(SGcoeff))
+    size = int(len(curve_0))
+    halfwin = int((winsize - 1) / 2)
+    extend = np.concatenate((curve_0[:halfwin], curve_0, curve_0[-halfwin:]))
+
+    filter = np.array([])
+    for i in range(size):
+        eachslice = extend[i:i + winsize]
+        mul = np.multiply(eachslice, SGcoeff)
+        cov = np.sum(mul)
+        filter = np.append(filter, cov)
+    return filter
+
+def three_filter(curve_0, SGcoeffs):
+    winsize = int(len(SGcoeffs))
+    size = int(len(curve_0))
+    halfwin = int((winsize - 1) / 2)
+
+    filt1 = auto_filter(curve_0, SGcoeffs)
+    filt2 = auto_filter(np.maximum(curve_0, filt1), SGcoeffs)
+    filt3 = auto_filter(np.maximum(curve_0, filt2), SGcoeffs)
+
+    W1 = np.zeros(curve_0.shape)
+    contant = np.ones(curve_0.shape)
+    for i in range(size):
+        start_index = max(i - halfwin, 0)
+        end_index = min(i + halfwin, size - 1)
+        eachslice = curve_0[start_index:end_index + 1]
+
+        sliceNocenter = np.copy(eachslice)
+        sliceNocenter[min(i, halfwin)] = np.nan
+
+        center = eachslice[min(i, halfwin)]
+        mean = np.nanmean(sliceNocenter)
+
+        W1[i] = np.abs(center - mean)/max(np.abs(np.nanmax(eachslice) - mean), np.abs(mean - np.nanmin(eachslice)))
+
+    W2 = contant - W1
+    filted = W1 * np.maximum(curve_0, filt1) + W2 * filt3
+
+    return filted
+
+def downTIFF(img, CRSimg_file, name):
+    output_imagename = name
+
+    crsimg = gdal.Open(CRSimg_file)
+    # Obtain the geographic transformation information and projection information of the input image
+    geotransform = crsimg.GetGeoTransform()
+    projection = crsimg.GetProjection()
+    width, height, cannel = img.shape[1], img.shape[0], img.shape[2]
+
+    driver = gdal.GetDriverByName('GTiff')
+    output_ds = driver.Create(output_imagename, width, height, Tsize, gdal.GDT_Float32)
+    output_ds.SetGeoTransform(geotransform)
+    output_ds.SetProjection(projection)
+
+    for i in range(Tsize):
+        output_band = output_ds.GetRasterBand(i + 1)
+        output_band.WriteArray(img[:, :, i])
+
+    output_ds = None
+
+####################################################################################################################
+'''Set algorithm parameters'''
+# Image raster processing range
+rowmin = 50
+rowmax = 1050
+colmin = 50
+colmax = 1050
+# Time size
+Tsize = 29  # The length of the extended time series : Tsize = ThisSize + (filter_win-1)
+ThisSize = 23  # The length of time series
+# half win size
+Thalfwin = 4  # Time halfwin
+halfwin = 5  # Space halfwin
+# threshold
+threshold_R = 0.85
+threshold_n = 10
+threshold_ice = 1500
+# SG filter parameter
+COEFFS_TREND = savgol_coeffs(7, 4)
+
+'''Set input File '''
+'''
+Data to be entered:  
+Raw data to be filtered: size is [row,col,Tsize]
+SummaryQA: The size is [row,col,Tsize] 
+'''
+region = 'ROIname'
+modNDVI_name = region + '_randomnoise.tif'
+SummaryQA_name = region + '_2020ri.tif'
+
+'''Data process'''
+mod = readmultiImg(modNDVI_name)
+SummaryQA = readmultiImg(SummaryQA_name)
+ri = SummaryQA_process(SummaryQA)
+
+badmask = mod.copy()
+badmask[ri == 2] = None
+ISTSG = np.zeros(mod.shape)
+
+####################################################################################################################
+for row in range(rowmin, rowmax+1):
+    for col in range(colmin, colmax+1):
+        # Open space window
+        badmask_neiSer = windowneiSer(badmask, row, col, halfwin)
+        targetpixle = badmask_neiSer[halfwin, halfwin, :]
+        ri_neiSer = windowneiSer(ri, row, col, halfwin)
+        # Calculate the number of time series involved in calculating the correlation coefficients
+        sum_nei = count_not_bad(ri_neiSer)
+        center_pixel = badmask_neiSer[halfwin, halfwin, :]
+        other_pixels = badmask_neiSer.reshape(-1, Tsize)
+        # Calculated correlation coefficient
+        R = everyR(center_pixel, other_pixels)
+        R_matrix = R.reshape(2 * halfwin + 1, 2 * halfwin + 1)
+        # Identify similar pixels
+        thresholdMask = (sum_nei >= threshold_n) & (R_matrix >= threshold_R)
+        NeiSim = np.copy(badmask_neiSer)
+        NeiSim[~thresholdMask] = None
+        NeiSim[halfwin, halfwin, :] = targetpixle
+        # specially treats ice and snow, and only needs a value greater than 0.15 when looking for similar pixels
+        NeiSim_maskIce = np.copy(NeiSim)
+        mask = NeiSim_maskIce < threshold_ice
+        NeiSim_maskIce[mask] = None
+        Simlar = NeiSim_maskIce
+
+        # Open Time window
+        regression = np.zeros(Tsize)
+        for t in range(Tsize):
+            start_index = max(t - Thalfwin, 0)
+            end_index = min(t + Thalfwin, Tsize - 1)
+            subarray = Simlar[:, :, start_index:end_index + 1]
+            targettime_pixle = subarray[halfwin, halfwin, :]
+
+            subarray_nocenter = np.copy(subarray)
+            subarray_nocenter[halfwin, halfwin, :] = None
+            # Determine the coefficient of regression
+            scale, offset = linerFit(subarray_nocenter, t)
+            liner = targettime_pixle * scale + offset
+            # At the time of each regression number, it needs to meet the NDVI size condition to be left
+            liner[(liner > 10000) | (liner < -10000)] = None
+            result = np.nanmedian(liner)
+            regression[t] = result
+
+        regression = check_sign(regression, mod[row, col, :])
+        regression_INT = linear_interpolation(regression)
+
+        is_all_nan = np.isnan(regression_INT).all()
+        if is_all_nan:
+            NoNAN_regression_INT = regression_INT
+            NoNAN_regression_INT[np.isnan(regression_INT)] = -11000
+            syn_mod2 = np.where(ri[row, col, :] == 0, mod[row, col, :],
+                                np.where(ri[row, col, :] == 2, regression_INT,
+                                         np.maximum(mod[row, col, :], NoNAN_regression_INT)))
+            syn_mod2[syn_mod2 == -11000] = np.nan
+            syn_mod2_inter = linear_interpolation(syn_mod2)
+            ISTSG[row, col, :] = three_filter(syn_mod2_inter, COEFFS_TREND)
+        else:
+            syn_mod1 = np.where(ri[row, col, :] == 0, mod[row, col, :],
+                                np.where(ri[row, col, :] == 2, regression_INT,
+                                         np.maximum(mod[row, col, :], regression_INT)))
+            ISTSG[row, col, :] = three_filter(syn_mod1, COEFFS_TREND)
+
+'''Data output'''
+# Specify the file name to save
+outfilename = region + '_ISTSG.tif'
+# Selective projection coordinate system
+CRSimg_file_path = modNDVI_name
+downTIFF(ISTSG, CRSimg_file_path, outfilename)
+print(f"The result is saved as {outfilename}")
 
