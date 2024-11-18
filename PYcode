@@ -212,9 +212,10 @@ Data to be entered:
 Raw data to be filtered: size is [row,col,Tsize]
 SummaryQA: The size is [row,col,Tsize] 
 '''
+file_path = r"**\**"
 region = 'ROIname'
-modNDVI_name = region + '_randomnoise.tif'
-SummaryQA_name = region + '_2020ri.tif'
+modNDVI_name = file_path + region + '_2020MODIS.tif'  # Complete path of Raw NDVI data to be filtered
+SummaryQA_name = file_path + region + '_2020ri.tif'  # Complete path of SummaryQA
 
 '''Data process'''
 mod = readmultiImg(modNDVI_name)
