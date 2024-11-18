@@ -1,1 +1,592 @@
+/////////////////* Set the data source (ROI)*/////////////////
+var HuaBei =  ee.Geometry.Polygon(
+        [[[108.91918577616096,32.548496402927675],
+          [120.16982876816763,32.548496402927675],
+          [120.16982876816763,41.54572682618529],
+          [108.91918577616096,41.54572682618529],
+          [108.91918577616096,32.548496402927675]]], null, false);
+          
+var ROI = HuaBei;
+var Str = ee.String('_real2020_HuaBei');
 
+/////////////////* set DataSat and time */////////////////
+// Define dates
+var collection = ee.ImageCollection("MODIS/061/MOD13A2");
+var Spaceresolution = 1000;
+var timeresolution = 16;
+
+var thisyear = 2020;
+var iniDate = ee.Date.fromYMD(thisyear - 1,11,10);  // Extend half window time forward
+var endDate = ee.Date.fromYMD(thisyear + 1,2,10);  // Extend half window time backwards
+
+/////////////////* select parameter */////////////////
+var sgcoeff47 = ee.List([0.0216450216450216,	-0.129870129870130,	0.324675324675325,	0.567099567099567,	0.324675324675325,	-0.129870129870130,0.0216450216450216]);
+
+var winsize = 11;  ///Spatial window ： winsize * winsize (units：Spaceresolution*Spaceresolution)
+
+var timewin = 4;  /// Time half window 
+var frame = ee.Number(timewin).multiply(ee.Number(timeresolution));
+
+var threshold_R = 0.85; // Threshold of correlation coefficient
+var threshold_n = 10;  
+
+var filterCOEFF = sgcoeff47;
+var fiter_windowSize = ee.Number(filterCOEFF.size());
+var fiter_half_winSize = fiter_windowSize.subtract(1).divide(2);
+
+/////////////////* Set functions */////////////////
+// some process function 
+function changecrs(img){
+  return img.reproject({crs:"EPSG:4326",scale:Spaceresolution})
+}
+
+function NDVIRI(image) { 
+  var ndvi = image.select('NDVI').multiply(0.0001); 
+  var RI = image.select('SummaryQA'); 
+  var newRI = RI.where(RI.eq(-1), 2).where(RI.eq(2), 2).where(RI.eq(3), 2); 
+
+return  image.addBands(newRI.rename('RI')).clip(ROI);
+}  
+
+function add_systime(ImageListadd,ImgListsystime){
+  var size = ImgListsystime.size();
+  var addproperity = ee.List.sequence(0,size.subtract(1)).map(function(s){
+    s = ee.Number(s);
+    var properity = ee.Image(ImgListsystime.get(s));
+    var img = ee.Image(ImageListadd.get(s));
+    var imgadd = img.copyProperties(properity, properity.propertyNames());
+    return imgadd})
+    
+  return addproperity
+}
+
+function imgtoLi(multimg){
+  var bandname = ee.List(multimg.bandNames());
+  var size = bandname.size();
+  var Li = ee.List.sequence(0,size.subtract(1)).map(function(i){
+    i = ee.Number(i);
+    var name = ee.String(bandname.get(i));
+    var img = ee.Image(multimg.select(name)).rename('filter');
+    return img
+  })
+  
+  return Li
+}
+
+function neibor(img){
+  img = ee.Image(img);
+  var W0 = ee.List.repeat(1,winsize);
+  var W = ee.List.repeat(W0,winsize);
+  var KW = ee.Kernel.fixed(winsize,winsize,W);
+  var near = img.neighborhoodToBands(KW);
+  
+  return near
+}
+
+function getBandNamesAndRemove(imageOrCollection, bandToRemove) {
+  imageOrCollection = ee.ImageCollection(imageOrCollection);
+  var allBandNames = imageOrCollection.first().bandNames();
+  var bandNamesArray = allBandNames.getInfo();
+  var filteredBandNames = bandNamesArray.filter(function(bandName) {
+    return bandName !== bandToRemove;
+  });
+
+  return filteredBandNames;
+}
+
+function coffR(ImageCol,targename,othername){
+  othername = ee.List(othername);
+  var win = ee.Number(winsize);
+  var everybandsR = ee.List.sequence(0,win.multiply(win).subtract(2)).map(function(i){
+      i = ee.Number(i);
+      var othe = ee.String(othername.get(i));
+      var correlationImage = ImageCol.select(targename,othe).reduce(ee.Reducer.pearsonsCorrelation());
+      var correlationCoefficient = correlationImage.select('correlation').rename(othe.cat('_correlation'));
+    
+    return correlationCoefficient
+  });
+  
+  return everybandsR
+}
+
+function LitoImage(list){
+  var len = list.size();
+  var Imagebanderro = ee.ImageCollection(list).toBands();
+  var erroname = Imagebanderro.bandNames();
+  var recname = ee.List.sequence(0,len.subtract(1)).map(function(k){
+  k = ee.Number(k);
+  var adjname =  ee.String(erroname.get(k)).split('_').slice(1).join('_');
+  return adjname
+  })
+  var Imageband = Imagebanderro.rename(recname);
+  
+  return Imageband
+}
+
+function selectetime(imgcol,winsize){
+  winsize = ee.Number(winsize);
+  var time   = 'system:time_start';
+  var timecontain = ee.Number(1000*60*60*24);
+  var maxDiff = ee.Filter.maxDifference(winsize.multiply(timecontain), time, null, time);
+  var cond    = {leftField:time, rightField:time};
+
+var f1 = ee.Filter.and(maxDiff, ee.Filter.lessThanOrEquals(cond));
+var f2 = ee.Filter.and(maxDiff, ee.Filter.greaterThanOrEquals(cond));
+var c1 = ee.Join.saveAll({matchesKey:'after', ordering:time, ascending:true})
+        .apply(imgcol, imgcol, f1);
+var c2 = ee.Join.saveAll({matchesKey:'before', ordering:time, ascending:true})
+        .apply(c1, imgcol, f2);
+        
+    var collen =  imgcol.size();  
+    var transC2 = c2.toList(collen);
+    var timesele = ee.List.sequence(0,collen.subtract(1)).map(function(i){
+      i = ee.Number(i);
+      var img =  ee.Image(transC2.get(i));
+      var afterun = img.get('after');
+      var beforeun = img.get('before');
+      
+      var afterli = ee.List(afterun);
+      var beforeli = ee.List(beforeun);
+      
+      var after = afterli.slice(1);
+      var before = beforeli.slice(0, -1);
+      
+      var sleImg = before.cat(after);
+      return sleImg
+    })
+  
+  return timesele
+}
+
+function neitolist(neighborlist,neinames){
+
+  neinames = ee.List(neinames);
+  var len = neighborlist.size();
+  var namelen = neinames.size();
+  var newnameList = ee.List.repeat('neiNDVI', namelen);
+
+  var listser = ee.List.sequence(0,len.subtract(1)).map(function(i){
+    i = ee.Number(i);
+    var img = ee.Image(neighborlist.get(i));
+      var bandImages = neinames.map(function(bandName) {
+        return img.select([bandName]).rename('neiNDVI');
+      });
+    var imageCollection = ee.ImageCollection.fromImages(bandImages);
+    return imageCollection.toList(namelen)
+  })
+  
+  return listser
+}
+
+function combinebands(collist1,collist2,len){
+  collist1 = ee.List(collist1);
+  collist2 = ee.List(collist2);
+  var comb = ee.List.sequence(0,len.subtract(1)).map(function(j){
+    j = ee.Number(j);
+    var img1 = ee.Image(collist1.get(j));
+    var img2 = ee.Image(collist2.get(j));
+        
+    var result = img1.addBands(img2);
+    return result
+  })
+  return comb
+}
+
+function everytimelineressgion(timeid,neitimeneilist,timeneilist,tarTwinLi,othername,xname,yname){
+  xname = ee.String(xname);
+  yname = ee.String(yname);
+  othername = ee.List(othername);
+  neitimeneilist = ee.List(neitimeneilist);
+  timeneilist = ee.List(timeneilist);
+  tarTwinLi = ee.List(tarTwinLi);
+  var serlen = timeneilist.size();
+  var namelen = othername.size();
+  
+  var everytimeList = ee.List(neitimeneilist.get(timeid));
+  var presentlistser = ee.List(timeneilist.get(timeid))
+  .map(function(img){return ee.Image(img).select(xname).rename(yname)});
+  var Ttimelist = ee.List(badmask_Twin_Li.get(timeid));
+  
+  var everylen = everytimeList.size();
+  var everytimeList_Li = neitolist(everytimeList,othername);
+  var everyressgion = ee.List.sequence(0,everylen.subtract(1)).map(function(i){
+      i = ee.Number(i)
+      var neimglist = ee.List(everytimeList_Li.get(i));
+      var combands = combinebands(neimglist,presentlistser,namelen);
+      var linecol = ee.ImageCollection(combands);
+      var linearFit = linecol.select([xname, yname])
+      .reduce(ee.Reducer.linearFit());
+      
+      var scale = linearFit.select('scale');
+      var offset = linearFit.select('offset');
+      var inputimg = ee.Image(Ttimelist.get(i)); 
+      var everyfit = (inputimg.multiply(scale)).add(offset).rename('adjustNDVI');
+      
+      //At the time of each regression number, it needs to meet the NDVI size condition to be left///
+      var valuemask = (everyfit.gt(-10000)).and(everyfit.lt(10000));
+      everyfit = everyfit.updateMask(valuemask);
+      
+      return everyfit  
+  })
+  
+  var fitcol = ee.ImageCollection(everyressgion).select('adjustNDVI');
+  var adjustmean = fitcol.median();
+  
+  return adjustmean
+}
+
+function replayvalue(oldlist,Wsumlist,oldname,Wsumname){
+  oldname = ee.String(oldname);
+  Wsumname = ee.String(Wsumname);
+  var len = Wsumlist.size()
+  var replace = ee.List.sequence(0,len.subtract(1)).map(function(i){
+    i = ee.Number(i);
+    var imgold = ee.Image(oldlist.get(i)).select(oldname).rename('MOD_NDVI_INTER').float();
+    var imgWsum = ee.Image(Wsumlist.get(i)).select(Wsumname).rename('MOD_NDVI_INTER').float();
+    
+    var imgri = ee.Image(oldlist.get(i)).select('RI');
+    var goodmask = imgri.eq(0);
+    var uncertainmask = imgri.eq(1);
+    var badMask = imgri.eq(2).or(imgri.eq(-1)).or(imgri.eq(3));
+    
+    var good = imgold.updateMask(goodmask);
+    var bad = imgWsum.updateMask(badMask);
+   
+    var uncertain = ee.ImageCollection([imgold,imgWsum]).max().updateMask(uncertainmask);
+    var whole = ee.ImageCollection([good,bad,uncertain]).max().rename('MOD_NDVI_INTER').clip(ROI);
+
+    return whole
+  })
+  
+  return replace
+}
+
+function MergeImageCollection(imgCol1,imgCol2){
+  
+  var list_imgCol1 = imgCol1.toList(imgCol1.size());
+  var list_imgCol2 = imgCol2.toList(imgCol2.size());
+  
+  var list_result = ee.List.sequence(0,imgCol1.size().subtract(1)).map(function(i){
+       
+       return ee.Image(list_imgCol1.get(i)).addBands(list_imgCol2.get(i));    
+    
+    });
+  
+  return ee.ImageCollection(list_result); 
+  
+}
+
+function generNewNDVI(imgCol,SGimgCol){
+  
+  var imgcol_org_sg = MergeImageCollection(imgCol,SGimgCol).map(function(img){
+      img = img.rename("org","sg");
+      var img_result = img.select("org").max(img.select("sg")).rename('result');
+      return  img.addBands(img_result).select('result').rename('MOD_NDVI_INTER');
+    
+    });
+    
+    return imgcol_org_sg;
+}
+
+function SgFilter(imgCol,list_sgCoeff){
+  
+  var windowSize = ee.Number(list_sgCoeff.size());
+  var half_winSize = windowSize.subtract(1).divide(2);
+  var imgColSize = ee.Number(imgCol.size());
+  imgCol = ee.ImageCollection(imgCol).map(function(img){
+    img = img.select("MOD_NDVI_INTER");
+    return img;
+  });
+  
+  var img_SgFilterCoeff = ee.Image.constant(list_sgCoeff);
+  var list_imgCol = imgCol.toList(imgCol.size());
+  var list_imgCol0 = list_imgCol.slice(0,half_winSize)
+                                    .cat(list_imgCol)
+                                    .cat(list_imgCol.slice(imgColSize.subtract(half_winSize)));
+  var imgColSize0 = imgColSize.add(windowSize).subtract(1);
+  
+  var list_processImgcol = ee.List.sequence(0,imgColSize0.subtract(windowSize));
+      list_processImgcol = list_processImgcol.map(function(i){
+          
+          i = ee.Number(i);
+          var imgCol_process = list_imgCol0.slice(i,i.add(windowSize));
+          imgCol_process = ee.ImageCollection(imgCol_process).toBands();
+          var img_process = imgCol_process.multiply(img_SgFilterCoeff).reduce(ee.Reducer.sum()).rename('sg');
+          
+          var img_org = ee.Image(list_imgCol0.get(i.add(half_winSize))).addBands(img_process).select('sg').rename('MOD_NDVI_INTER');//only save new sg, rename"MOD_NDVI_INTER"
+          return img_org;        
+        
+      });
+  
+  var list_images_SgFiltered = list_processImgcol; 
+  
+  return ee.ImageCollection(list_images_SgFiltered).sort('system:time_start');
+}
+
+function sliceTimeWin(imgcol,winsize){
+  
+  winsize = ee.Number(winsize);
+  
+  var time   = 'system:time_start';
+  var timecontain = ee.Number(1000*60*60*24);
+  var maxDiff = ee.Filter.maxDifference(winsize.multiply(timecontain), time, null, time);
+  var cond    = {leftField:time, rightField:time};
+
+  var f1 = ee.Filter.and(maxDiff, ee.Filter.lessThanOrEquals(cond));
+  var f2 = ee.Filter.and(maxDiff, ee.Filter.greaterThanOrEquals(cond));
+  var c1 = ee.Join.saveAll({matchesKey:'after', ordering:time, ascending:true})
+          .apply(imgcol, imgcol, f1);
+  var c2 = ee.Join.saveAll({matchesKey:'before', ordering:time, ascending:true})
+          .apply(c1, imgcol, f2);
+        
+    var collen =  imgcol.size();  
+    var transC2 = c2.toList(collen);
+    var timesele = ee.List.sequence(0,collen.subtract(1)).map(function(i){
+      i = ee.Number(i);
+      var img =  ee.Image(transC2.get(i));
+      var afterun = img.get('after');
+      var beforeun = img.get('before');
+      
+      var afterli = ee.List(afterun);
+      var beforeli = ee.List(beforeun);
+      
+      var after = afterli;
+      var before = beforeli.slice(0, -1);
+      
+      var sleImg = before.cat(after);
+      return sleImg
+    })
+  
+  return timesele
+}
+
+/////////////////* Data process */////////////////
+// MODIS NDVI time series data
+var mod = collection
+            .filterDate(iniDate, endDate)
+            .filterBounds(ROI)
+            .map(changecrs);
+            
+var size = mod.size();
+var Tsize = size.subtract(fiter_windowSize.subtract(1));  
+var list_process = ee.List.sequence(0,size.subtract(1));    
+var list_time = ee.List.sequence(0,Tsize.subtract(1));  
+
+var mod_ndvi = mod
+        .map(NDVIRI)
+        .select('NDVI','RI');
+
+var ri = mod_ndvi.select('RI');
+var mod_ndvi_Li = mod_ndvi.toList(size);
+var modndvi_Li = mod_ndvi.select('NDVI').toList(size);
+var modndvi = mod_ndvi.select('NDVI');
+var ri_Li = mod_ndvi.select('RI').toList(size);
+Map.addLayer(modndvi,{},'modndvi');
+Map.addLayer(ee.ImageCollection(ri_Li),{},'RI');
+
+/////////////////* Step 1 */////////////////
+//process Quality label
+var RIflag = mod_ndvi.select('RI').map(function(img){return img.eq(0).or(img.eq(1));}); // good or uncertain point
+
+var RIflag_Li = RIflag.toList(size);
+RIflag_Li = add_systime(RIflag_Li,modndvi_Li);
+RIflag = ee.ImageCollection(RIflag_Li);
+
+var badmask_Li = list_process.map(function(i){
+  i = ee.Number(i);
+  var  flag = ee.Image(RIflag_Li.get(i));
+  var  vi = ee.Image(modndvi_Li.get(i));
+  var img = vi.updateMask(flag);
+  
+  return img.copyProperties(vi, vi.propertyNames())
+});
+
+var badmask = ee.ImageCollection(badmask_Li);
+
+// local window
+var RIflag_nei = RIflag.map(neibor);
+var badmask_nei = badmask.map(neibor);
+
+var RIflag_nei_Li = RIflag_nei.toList(size);
+RIflag_nei_Li = add_systime(RIflag_nei_Li,modndvi_Li);
+RIflag_nei = ee.ImageCollection(RIflag_nei_Li);
+var badmask_nei_Li = badmask_nei.toList(size);
+badmask_nei_Li = add_systime(badmask_nei_Li,modndvi_Li);
+badmask_nei = ee.ImageCollection(badmask_nei_Li);
+
+//corr R
+var targename = 'NDVI_0_0';
+var othername = getBandNamesAndRemove(badmask_nei, targename);
+
+var badmask_nei_R_li = coffR(badmask_nei,targename,othername);
+var badmask_nei_R = LitoImage(badmask_nei_R_li);
+
+var badmask_Twin_Li = selectetime(badmask,frame);
+var RIflag_nei_Twin_Li = selectetime(RIflag_nei,frame);
+var badmask_nei_Twin_Li = selectetime(badmask_nei,frame);
+
+// Indicates the number of available points in the prelude. If the number is greater than or equal to threshold_n, and if R is greater than or equal to threshold_R, similar pixels are listed
+var sumgood = RIflag_nei.sum();
+var threshold_R_mask = badmask_nei_R.gte(ee.Image.constant(threshold_R));
+var targetRI = 'RI_0_0'
+var otherRI = getBandNamesAndRemove(sumgood, targetRI);
+var threshold_n_mask = sumgood.gte(ee.Image.constant(threshold_n)).select(otherRI);
+
+var threshold_mask = threshold_R_mask.multiply(threshold_n_mask);
+var corre_valid = badmask_nei_R.multiply(threshold_mask);    
+
+//similar pixle
+var threshold_mask = threshold_mask;
+var threshold_mask_Bname = ee.List(threshold_mask.bandNames());
+var threshold_mask_rname = threshold_mask.select(threshold_mask_Bname).rename(othername);
+
+var mask1 = threshold_mask_rname.neq(-1).reduce(ee.Reducer.max()).rename('NDVI_0_0');
+var half =(winsize*winsize-1)/2;
+var part1 =  othername.slice(0, half);
+var part2 =  othername.slice(half);
+var threshold_Mask = threshold_mask_rname.select(part1).addBands(mask1).addBands(threshold_mask_rname.select(part2));
+
+var badmask_neisim_Li = list_process.map(function(k){
+  k = ee.Number(k);
+  var badmaskimg = ee.Image(badmask_nei_Li.get(k))
+  var simmask = badmaskimg.updateMask(threshold_Mask);
+  // specially treats ice and snow, and only needs a value greater than 0.15 when looking for similar pixels
+  var noiceMask = badmaskimg.gt(1500);
+  simmask = simmask.updateMask(noiceMask);
+  
+  return simmask
+})
+
+var badmask_neisim = ee.ImageCollection(badmask_neisim_Li);
+var badmask_neilist_Li = neitolist(badmask_nei_Li,othername);
+var badmask_neisimlist_Li = neitolist(badmask_neisim_Li,othername);
+var badmask_neisim_Twin_Li = selectetime(badmask_neisim,frame);
+
+var Rressgion_Li = list_process.map(function(t){
+  t = ee.Number(t);
+  var ressgioni = everytimelineressgion(t,badmask_neisim_Twin_Li,badmask_neisimlist_Li,badmask_Twin_Li,othername,'neiNDVI','NDVI');
+  
+  var rawimg = ee.Image(modndvi_Li.get(t));
+  var IfError = ((rawimg.gt(0)).and(ressgioni.gt(0))).or((rawimg.lt(0)).and(ressgioni.lt(0)));
+  ressgioni = ressgioni.updateMask(IfError);
+
+  return ressgioni
+})
+Rressgion_Li = add_systime(Rressgion_Li,modndvi_Li);
+var Rressgion = ee.ImageCollection(Rressgion_Li);
+
+// linear interpolation
+var interl_m = require('users/weiguifengzang/SGfilter:interpol');
+var Tframe  = timeresolution*14; 
+var nodata = -9999; 
+var inter = interl_m.linearInterp(Rressgion, Tframe, nodata);
+inter = inter.select(['MOD_NDVI_INTER']);
+var inter_Li = inter.toList(size);
+
+var syn_Li = replayvalue(mod_ndvi_Li,inter_Li,'NDVI','MOD_NDVI_INTER');
+syn_Li = add_systime(syn_Li,modndvi_Li);
+var syn = ee.ImageCollection(syn_Li);
+
+var intersyn = interl_m.linearInterp(syn, Tframe, nodata);
+intersyn = intersyn.select(['MOD_NDVI_INTER']);
+var intersyn_Li = intersyn.toList(size);
+
+/////////////////* Step 2 */////////////////
+var fiter_half_winTime = fiter_half_winSize.multiply(ee.Number(timeresolution));
+
+var syn_neiT_Li = sliceTimeWin(intersyn,fiter_half_winTime);
+var syn_neiT_NoCenter_Li = selectetime(intersyn,fiter_half_winTime);
+
+var Weight1_Li = list_process.map(function(i){
+  i = ee.Number(i);
+  var eachslice = ee.ImageCollection(ee.List(syn_neiT_Li.get(i)));
+  var eachNocenter = ee.ImageCollection(ee.List(syn_neiT_NoCenter_Li.get(i)));
+  var center = ee.Image(intersyn_Li.get(i));
+  
+  var nocenter_mean = eachNocenter.reduce(ee.Reducer.mean()).rename('caculate');
+  var window_max = eachslice.reduce(ee.Reducer.max()).rename('caculate');
+  var window_min = eachslice.reduce(ee.Reducer.min()).rename('caculate');
+  
+  var subitem = ee.ImageCollection([(window_max.subtract(nocenter_mean)).abs(),(nocenter_mean.subtract(window_min)).abs()]).reduce(ee.Reducer.max()).rename('caculate');
+  
+  var weight = ((center.subtract(nocenter_mean)).abs()).divide(subitem);
+  
+  return weight
+})
+
+var Weight2_Li = list_process.map(function(i){
+  i = ee.Number(i);
+  var W1 = ee.Image(Weight1_Li.get(i));
+  var W1Mask = W1.gte(0);
+  var W2 = ee.Image(1).updateMask(W1Mask).subtract(W1).rename(W1.bandNames());
+  return W2
+})
+
+
+var filter1 = SgFilter(intersyn,filterCOEFF);
+var filter1_Li = filter1.toList(filter1.size());
+var Newcurve1 = generNewNDVI(intersyn,filter1);
+var Newcurve1_Li = Newcurve1.toList(size);
+
+var filter2 = SgFilter(Newcurve1,filterCOEFF);
+var Newcurve2 = generNewNDVI(intersyn,filter2);
+
+var filter3 = SgFilter(Newcurve2,filterCOEFF);
+var filter3_Li = filter3.toList(filter3.size());
+
+var Istsg_Li = list_process.map(function(i){
+  i = ee.Number(i);
+  var filted1 = ee.Image(Newcurve1_Li.get(i));
+  var filted3 = ee.Image(filter3_Li.get(i));
+  var W1 = ee.Image(Weight1_Li.get(i));
+  var W2 = ee.Image(Weight2_Li.get(i));
+  var filted = (W1.multiply(filted1)).add(W2.multiply(filted3)).rename('MOD_NDVI_ISTSG');
+  return filted
+})
+
+Istsg_Li = add_systime(Istsg_Li, modndvi_Li);
+var Istsg = ee.ImageCollection(Istsg_Li);
+Map.addLayer(Istsg,{},'Istsg');
+print(Istsg,'Istsg');
+
+/////////////////* Show and Down */////////////////
+// show Image
+var ndviVis = {
+  min: 0,
+  max: 10000,
+  palette: [
+    'ffffff', 'ce7e45', 'df923d', 'f1b555', 'fcd163', '99b718', '74a901',
+    '66a000', '529400', '3e8601', '207401', '056201', '004c00', '023b01',
+    '012e01', '011d01', '011301'
+  ],
+};
+Map.addLayer(ee.Image(Istsg_Li.get(12)),{},'Istsg');
+
+
+//down imgecollection to bands
+function coltobandsoutput(col,outname){
+  var img = col.toBands();
+  outname = ee.String(outname);
+  var bandname = img.bandNames();
+    var bandname0 = bandname.map(function(i){
+      var namei = ee.String(i);
+      var namei0 = outname.cat('_').cat(namei);
+      return namei0;
+    });
+  var serimg = img.rename(bandname0);
+  return serimg
+}
+
+//down procession
+var Istsg_down_Li = Istsg_Li.slice(fiter_half_winSize,fiter_half_winSize.add(Tsize));
+var Istsg_down = coltobandsoutput(Istsg_down_Li.select('MOD_NDVI_ISTSG'),'MOD_NDVI_ISTSG');
+
+Export.image.toDrive({
+  image:Istsg_down,
+  folder:'ISTSG_2020',
+  description: (ee.String("Istsg").cat(Str)).getInfo(),  //the name of output 
+  region:ROI,
+  scale:1000,
+  crs:'EPSG:4326',
+  maxPixels:1e13
+});
