@@ -476,7 +476,7 @@ Rressgion_Li = add_systime(Rressgion_Li,modndvi_Li);
 var Rressgion = ee.ImageCollection(Rressgion_Li);
 
 // linear interpolation
-var interl_m = require('users/weiguifengzang/SGfilter:interpol');
+var interl_m = require('users/Your_account_path/name_of_the_folder_where_you_store_the_interpol_file:interpol');
 var Tframe  = timeresolution*14; 
 var nodata = -9999; 
 var inter = interl_m.linearInterp(Rressgion, Tframe, nodata);
