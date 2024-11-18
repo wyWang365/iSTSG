@@ -22,12 +22,11 @@ Filter main when running GEE_mian, it is necessary to change the function call r
 
 The running environment is PyCharm Community Edition 2022.1.2
 The python version accepts file input and requires input of MODIS data and quality label data when running the code.
-The input file is.tif (it is necessary to open a time window and a space window, and the input data needs to be extended in time sequence and expanded in space).
+The input file is .tif (it is necessary to open a time window and a space window, and the input data needs to be extended in time sequence and expanded in space).
 
 - Accept input as:
-Single multi-band tif image data with NDVI time series as the number of bands (for example, there are 23 single-band NDVI images in a year with 16-day time resolution, and the filtering window length needs to be extended by half the window length according to the filtering window length of STEP2, then the accepted input is a tif file with 29(23+3+3) bands).
-
-A single multi-band tif image data with the quality label time series as the number of bands (for example, there are 23 single-band tif images with a 16-day time resolution in one year, and the filtering window length needs to be extended by half the window length according to the filtering window length of STEP2, then the accepted input is a TIF file with 29(23+3+3) bands).
+  - Single multi-band tif image data with NDVI time series as the number of bands (for example, there are 23 single-band NDVI images in a year with 16-day time resolution, and the filtering window length needs to be extended by half the window length according to the filtering window length of STEP2, then the accepted input is a tif file with 29(23+3+3) bands).
+  - A single multi-band tif image data with the quality label time series as the number of bands (for example, there are 23 single-band tif images with a 16-day time resolution in one year, and the filtering window length needs to be extended by half the window length according to the filtering window length of STEP2, then the accepted input is a TIF file with 29(23+3+3) bands).
 
 - The spatial window size needs to be considered when dealing with grid boundaries:
-The algorithm has the need of opening space window, and the filtering boundary (rowmin,rowmax,colmin,colmax) can be selected and controlled according to the demand and the size of space half window, so as to find enough similar pixels
+  > The algorithm has the need of opening space window, and the filtering boundary (rowmin,rowmax,colmin,colmax) can be selected and controlled according to the demand and the size of space half window, so as to find enough similar pixels.
