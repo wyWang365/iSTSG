@@ -16,7 +16,7 @@ The open-source code is divided into **Google earth engine version (JS)** and **
 After logging in to the Google earth engine platform, the user needs to complete a required modification before running the filter main function GEE_mian.
 
 - Required modification:
-  - Store the linear interpolation function GEE_interpol in a Scripts code file. Then change the function call path ( (require('users/Your_account_path/name_of_the_folder_where_you_store_the_interpol_file:interpol');) ) according to where it is stored.
+  - Store the linear interpolation function GEE_interpol in a Scripts code file. Then change the function call path ( (require('users/Your_account_path/name_of_the_folder_where_you_store_the_interpol_file:Scripts_name_of_interpol_saved_in_the_folder');) ) according to where it is stored.
 
 - Modification of optional parameters:
   > The user can change the ROI range and various parameters within the function. (Note that when modifying the SG filtering coefficient of STEP2, the filtering parameters corresponding to the window length and order need to be entered)
