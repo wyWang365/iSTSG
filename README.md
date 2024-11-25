@@ -12,11 +12,13 @@ The iSTSG method utilizes the same input data as Chen-SG method, specifically th
 The open-source code is divided into **Google earth engine version (JS)** and **python version** (GEE version is more convenient, python version needs longer running time).
 
 **The Google earth engine version is divided into two files: GEE_interpol and GEE_mian**
+After logging in to the Google earth engine platform, the user needs to complete a required modification before running the filter main function GEE_mian.
 
-Users can sign in to the Google earth engine platform and store the linear interpolation function GEE_interpol in a separate code file.
-Filter main when running GEE_mian, it is necessary to change the function call route (require('users/Your_account_path/name_of_the_folder_where_you_store_the_interpol_file:interpol');), and the user can change the ROI range and various parameters in the code.
+- Required modification:
+ - Store the linear interpolation function GEE_interpol in a Scripts code file. Then change the function call path ( (require('users/Your_account_path/name_of_the_folder_where_you_store_the_interpol_file:interpol');) ) according to where it is stored.
 
-
+- Modification of optional parameters:
+ - The user can change the ROI range and various parameters within the function. (Note that when modifying the SG filtering coefficient of STEP2, the filtering parameters corresponding to the window length and order need to be entered)
 
 **The python version of the code has only one file: PYcode**
 
