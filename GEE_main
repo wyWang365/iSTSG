@@ -580,7 +580,7 @@ function coltobandsoutput(col,outname){
 
 //down procession
 var Istsg_down_Li = Istsg_Li.slice(fiter_half_winSize,fiter_half_winSize.add(Tsize));
-var Istsg_down = coltobandsoutput(Istsg_down_Li.select('MOD_NDVI_ISTSG'),'MOD_NDVI_ISTSG');
+var Istsg_down = coltobandsoutput(ee.ImageCollection(Istsg_down_Li).select('MOD_NDVI_ISTSG'),'MOD_NDVI_ISTSG');
 
 Export.image.toDrive({
   image:Istsg_down,
