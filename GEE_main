@@ -20,7 +20,8 @@ var iniDate = ee.Date.fromYMD(thisyear - 1,11,10);  // Extend half window time f
 var endDate = ee.Date.fromYMD(thisyear + 1,2,10);  // Extend half window time backwards
 
 /////////////////* select parameter */////////////////
-var sgcoeff47 = ee.List([0.0216450216450216,	-0.129870129870130,	0.324675324675325,	0.567099567099567,	0.324675324675325,	-0.129870129870130,0.0216450216450216]);
+// The SG filtering coefficient of step2 is calculated as input
+var sgcoeff47 = ee.List([0.0216450216450216,	-0.129870129870130,	0.324675324675325,	0.567099567099567,	0.324675324675325,	-0.129870129870130,   0.0216450216450216]);
 
 var winsize = 11;  ///Spatial window ： winsize * winsize (units：Spaceresolution*Spaceresolution)
 
