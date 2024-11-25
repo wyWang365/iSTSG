@@ -11,13 +11,13 @@ var Str = ee.String('_real2020_HuaBei');
 
 /////////////////* set DataSat and time */////////////////
 // Define dates
-var collection = ee.ImageCollection("MODIS/061/MOD13A2");
-var Spaceresolution = 1000;
-var timeresolution = 16;
+var collection = ee.ImageCollection("MODIS/061/MOD13A2");  // dataset collection
+var Spaceresolution = 1000;  // Spatial resolution of the dataset collection (in meters)
+var timeresolution = 16;  // Time resolution of the dataset collection (in days)
 
 var thisyear = 2020;
-var iniDate = ee.Date.fromYMD(thisyear - 1,11,10);  // Extend half window time forward
-var endDate = ee.Date.fromYMD(thisyear + 1,2,10);  // Extend half window time backwards
+var iniDate = ee.Date.fromYMD(thisyear - 1,11,10);  // Extend fiter_half_winSize time forward
+var endDate = ee.Date.fromYMD(thisyear + 1,2,10);  // Extend fiter_half_winSize time backwards
 
 /////////////////* select parameter */////////////////
 // The SG filtering coefficient of step2 is calculated as input
@@ -548,7 +548,6 @@ var Istsg_Li = list_process.map(function(i){
 Istsg_Li = add_systime(Istsg_Li, modndvi_Li);
 var Istsg = ee.ImageCollection(Istsg_Li);
 Map.addLayer(Istsg,{},'Istsg');
-print(Istsg,'Istsg');
 
 /////////////////* Show and Down */////////////////
 // show Image
@@ -581,6 +580,7 @@ function coltobandsoutput(col,outname){
 //down procession
 var Istsg_down_Li = Istsg_Li.slice(fiter_half_winSize,fiter_half_winSize.add(Tsize));
 var Istsg_down = coltobandsoutput(ee.ImageCollection(Istsg_down_Li).select('MOD_NDVI_ISTSG'),'MOD_NDVI_ISTSG');
+print(Istsg_down_Li,'Istsg');
 
 Export.image.toDrive({
   image:Istsg_down,
