@@ -1,5 +1,5 @@
 # iSTSG
-An improved spatiotemporal savitzky-golay (iSTSG) method to improve the quality of vegetation index time-series data on the Google Earth Engine
+**An improved spatiotemporal savitzky-golay (iSTSG) method to improve the quality of vegetation index time-series data on the Google Earth Engine**
 
 - link: https://ieeexplore.ieee.org/document/10843791
 - You can cite our papers in the following format：
